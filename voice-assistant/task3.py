@@ -6,6 +6,23 @@ A Friendly Command-Line Voice Assistant
 import webbrowser
 import datetime
 import random
+import os
+import sys
+from contextlib import contextmanager
+
+@contextmanager
+def suppress_alsa_warnings():
+    """Temporarily redirect C-level stderr to /dev/null to hide ALSA/JACK and Browser errors."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    sys.stderr.flush()
+    os.dup2(devnull, 2)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(devnull)
+        os.close(old_stderr)
 
 try:
     import speech_recognition as sr
@@ -29,7 +46,9 @@ def speak(engine, text):
     print(f"Assistant: {text}")
     if engine is not None:
         engine.say(text)
-        engine.runAndWait()
+        # Suppress ALSA warnings during audio playback
+        with suppress_alsa_warnings():
+            engine.runAndWait()
 
 
 def listen(recognizer):
@@ -38,10 +57,17 @@ def listen(recognizer):
         return input("You (type here): ").strip()
 
     try:
-        with sr.Microphone() as source:
+        # 1. Initialize the microphone silently to hide ALSA warnings
+        with suppress_alsa_warnings():
+            mic = sr.Microphone()
+            
+        # 2. Use the initialized microphone normally
+        with mic as source:
             print("Listening...")
-            recognizer.adjust_for_ambient_noise(source)
+            # Calibrate to background noise for 1 second before listening
+            recognizer.adjust_for_ambient_noise(source, duration=1)
             audio = recognizer.listen(source, timeout=5)
+            
         command = recognizer.recognize_google(audio)
         print(f"You said: {command}")
         return command.lower()
@@ -58,17 +84,20 @@ def handle_command(command, engine):
         topic = command.split("search for", 1)[1].strip()
         if topic:
             speak(engine, f"Searching the web for {topic}")
-            webbrowser.open(f"https://www.google.com/search?q={topic}")
+            with suppress_alsa_warnings():
+                webbrowser.open(f"https://www.google.com/search?q={topic}")
         else:
             speak(engine, "What would you like me to search for?")
 
     elif "open youtube" in command:
         speak(engine, "Opening YouTube")
-        webbrowser.open("https://www.youtube.com")
+        with suppress_alsa_warnings():
+            webbrowser.open("https://www.youtube.com")
 
     elif "open wikipedia" in command:
         speak(engine, "Opening Wikipedia")
-        webbrowser.open("https://www.wikipedia.org")
+        with suppress_alsa_warnings():
+            webbrowser.open("https://www.wikipedia.org")
 
     elif "time" in command:
         now = datetime.datetime.now().strftime("%I:%M %p")
